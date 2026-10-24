@@ -4488,7 +4488,13 @@ function openAutoSubs() {
 }
 
 /* ---- 2) text to video (Pollinations: free, no key) ---- */
+/* موافقة واحدة في كل جلسة قبل إرسال نص المستخدم إلى خدمة pollinations.ai الخارجية المجانية */
+let aiCloudOk = false;
 async function aiFetch(url, type, tries = 3) {
+  if (/pollinations\.ai/.test(url) && !aiCloudOk) {
+    aiCloudOk = confirm('سيُرسل النص الذي كتبته (الموضوع أو وصف المشاهد) إلى خدمة pollinations.ai المجانية الخارجية لتوليد النصوص والصور. لا تكتب فيه بيانات شخصية أو سرية. هل تريد المتابعة؟');
+    if (!aiCloudOk) throw new Error('أُلغي الإرسال إلى الخدمة الخارجية');
+  }
   for (let i = 0; i < tries; i++) {
     const ac = new AbortController(), to = setTimeout(() => ac.abort(), 120000);
     try {
