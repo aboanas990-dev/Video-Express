@@ -459,11 +459,14 @@ body,body button,body input,body select,body textarea{font-family:'Tajawal',syst
       locked: 'هذه النسخة محمية وتحتاج تفعيلًا على هذا الجهاز.', loading: 'جارٍ فتح البرنامج…',
       trialCol: 'تجربة مجانية', free: 'مجانًا', bestValue: 'الأفضل قيمة', duration: 'المدة', devicesRow: 'عدد الأجهزة',
       appsRow: 'البرامج', thisApp: 'هذا البرنامج', choose: 'اختر', startTrialShort: 'ابدأ التجربة', selected: 'الخطة المختارة',
+      orgName: 'اسم الجهة (يظهر في البرنامج والتقارير)',
+      extraDevices: 'أجهزة إضافية', extraHint: (n, pct) => `الافتراضي ${n === 2 ? 'جهازان' : `${n} أجهزة`}${pct ? ` · كل جهاز إضافي +${pct}%` : ''}`, total: p => `الإجمالي: ${p}`,
       errors: {
         license_not_found: 'المفتاح غير صحيح.', invalid_key_format: 'صيغة المفتاح غير صحيحة.',
         license_revoked: 'هذا الترخيص موقوف.', license_expired: 'انتهت صلاحية هذا الترخيص.',
         wrong_app: 'هذا المفتاح لبرنامج آخر.', device_limit: 'وصلت للحد الأقصى من الأجهزة. ألغِ التفعيل من جهاز آخر أو تواصل معنا.',
         invalid_email: 'البريد الإلكتروني غير صحيح.', no_payment_provider: 'الدفع غير متاح حاليًا.',
+        invalid_extra_devices: 'عدد الأجهزة الإضافية غير صحيح.', org_required: 'اكتب اسم الجهة (حرفان على الأقل).',
         network: 'تعذّر الاتصال بالخادم. تحقق من الإنترنت.', popup: 'اسمح بالنوافذ المنبثقة ثم أعد المحاولة.',
         no_trial: 'لا تتوفر نسخة تجريبية.', not_renewable: 'هذه الرخصة لا تحتاج تجديدًا.',
         build_not_found: 'هذا الإصدار غير مسجّل على الخادم.', decrypt: 'تعذّر فك تشفير النسخة على هذا الجهاز.',
@@ -486,11 +489,14 @@ body,body button,body input,body select,body textarea{font-family:'Tajawal',syst
       locked: 'This copy is protected and must be activated on this device.', loading: 'Opening…',
       trialCol: 'Free trial', free: 'Free', bestValue: 'Best value', duration: 'Duration', devicesRow: 'Devices',
       appsRow: 'Apps', thisApp: 'This app', choose: 'Choose', startTrialShort: 'Start trial', selected: 'Selected plan',
+      orgName: 'Organisation name (shown in the app and reports)',
+      extraDevices: 'Extra devices', extraHint: (n, pct) => `${n} devices included by default${pct ? ` · +${pct}% per extra device` : ''}`, total: p => `Total: ${p}`,
       errors: {
         license_not_found: 'Invalid license key.', invalid_key_format: 'That does not look like a license key.',
         license_revoked: 'This license has been revoked.', license_expired: 'This license has expired.',
         wrong_app: 'This key is for another app.', device_limit: 'Device limit reached. Deactivate another device or contact us.',
         invalid_email: 'Invalid email address.', no_payment_provider: 'Payments are unavailable right now.',
+        invalid_extra_devices: 'Invalid number of extra devices.', org_required: 'Enter the organisation name (at least 2 characters).',
         network: 'Could not reach the server. Check your connection.', popup: 'Allow pop-ups and try again.',
         no_trial: 'No trial available.', not_renewable: 'This license does not need renewal.',
         build_not_found: 'This version is not registered on the server.', decrypt: 'Could not decrypt this copy on this device.',
@@ -609,7 +615,18 @@ body,body button,body input,body select,body textarea{font-family:'Tajawal',syst
     S.state = state;
     S.payload = payload;
     if (changed) S.listeners.forEach(fn => { try { fn(status()); } catch (e) { console.error(e); } });
+    // اسم الجهة (رخص المؤسسات) تغيّر: يعرضه البرنامج في واجهته وتقاريره
+    const o = org();
+    if (o !== S.org) {
+      S.org = o;
+      try { global.dispatchEvent?.(new CustomEvent('express-license:org', { detail: { org: o } })); } catch {}
+    }
     renderBadge();
+  }
+
+  // اسم الجهة من الرمز الموقّع الساري فقط، فلا يمكن تعديله من جهاز العميل
+  function org() {
+    return S.state === 'licensed' && S.payload?.org ? S.payload.org : null;
   }
 
   function status() {
@@ -622,6 +639,7 @@ body,body button,body input,body select,body textarea{font-family:'Tajawal',syst
       licenseKey: p?.lic || null,
       licenseType: p?.t || null,
       customerName: p?.n || null,
+      org: org(),
       email: p?.e || null,
       expiresAt: p?.exp || null,
       daysLeft,
@@ -727,8 +745,8 @@ body,body button,body input,body select,body textarea{font-family:'Tajawal',syst
     }
   }
 
-  async function buy({ plan, email, name, phone } = {}) {
-    const orderId = await openCheckout(() => api('/v1/checkout', { plan, app: S.cfg.app, email, name, phone, locale: S.lang }));
+  async function buy({ plan, email, name, phone, org, extra_devices = 0 } = {}) {
+    const orderId = await openCheckout(() => api('/v1/checkout', { plan, app: S.cfg.app, email, name, phone, org, extra_devices, locale: S.lang }));
     return waitForOrder(orderId, false);
   }
 
@@ -863,6 +881,8 @@ body,body button,body input,body select,body textarea{font-family:'Tajawal',syst
   .cmp .pick.alt{background:transparent;color:#a5b4fc;margin:0}
   .sel{font-size:14px;color:#c7d2fe;margin-bottom:10px}
   .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .xd{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin-bottom:10px}
+  .xd label{margin:0}.xd input{width:90px;margin:0}.xd small{color:#94a3b8}.xd b{color:#a5b4fc;margin-inline-start:auto}
   .cmp tbody th,.cmp thead th:first-child{position:sticky;inset-inline-start:0;background:#0f172a;z-index:1}
   @media (max-width:520px){.two{grid-template-columns:1fr}.cmp tbody th{min-width:92px;font-size:12px}.cmp th,.cmp td{padding:7px 8px}}
   .plans{display:grid;gap:8px;margin-bottom:14px}
@@ -886,7 +906,7 @@ body,body button,body input,body select,body textarea{font-family:'Tajawal',syst
     if (host?.isConnected) return;
     host = document.createElement('express-license');
     root = host.attachShadow({ mode: 'open' });
-    root.innerHTML = `<style>${CSS}</style>`;
+    root.innerHTML = `<style>${CSS}<\/style>`;
     badgeEl = null;
     (document.body || document.documentElement).appendChild(host);
   }
@@ -1033,11 +1053,34 @@ body,body button,body input,body select,body textarea{font-family:'Tajawal',syst
         const table = el('div', { class: 'cmp' }, el('table', {}, el('thead', {}, head), el('tbody', {}, rows, pickRow)));
 
         const summary = el('div', { class: 'sel' });
-        const name = el('input', { placeholder: t.name, autocomplete: 'name' });
+        const isOrg = !!info.app.enterprise;
+        const name = el('input', isOrg ? { placeholder: t.orgName, autocomplete: 'organization', required: true, maxlength: '120' } : { placeholder: t.name, autocomplete: 'name' });
         const email = el('input', { type: 'email', placeholder: 'name@example.com', autocomplete: 'email' });
         const btn = el('button', { class: 'go' });
         const fields = el('div', { class: 'two' },
-          el('div', {}, el('label', {}, t.name), name), el('div', {}, el('label', {}, t.email), email));
+          el('div', {}, el('label', {}, isOrg ? t.orgName : t.name), name), el('div', {}, el('label', {}, t.email), email));
+        // أجهزة إضافية: كل جهاز = extra_device_price_minor، والخادم يعيد حساب المبلغ
+        const extraIn = el('input', { type: 'number', min: '0', step: '1', value: '0', inputmode: 'numeric' });
+        const extraHint = el('small');
+        const total = el('b');
+        const extraBox = el('div', { class: 'xd' }, el('label', {}, t.extraDevices), extraIn, extraHint, total);
+        const extraCount = p => Math.min(Math.max(Math.floor(Number(extraIn.value) || 0), 0), p.max_extra_devices || 0);
+        const totalPrice = p => {
+          const n = extraCount(p);
+          return fmtPrice({ ...p, price: (p.price_minor + n * (p.extra_device_price_minor || 0)) / 100 });
+        };
+        const refreshTotal = () => {
+          const p = info.plans.find(x => x.id === selected);
+          if (!p) return;
+          total.textContent = t.total(totalPrice(p));
+          btn.textContent = t.buy(totalPrice(p));
+        };
+        extraIn.oninput = refreshTotal;
+        extraIn.onchange = () => {
+          const p = info.plans.find(x => x.id === selected);
+          if (p) extraIn.value = String(extraCount(p));
+          refreshTotal();
+        };
         function choose(id) {
           selected = id;
           table.querySelectorAll('[data-id]').forEach(x => x.classList.toggle('on', x.dataset.id === id));
@@ -1046,12 +1089,17 @@ body,body button,body input,body select,body textarea{font-family:'Tajawal',syst
             summary.textContent = `${t.selected}: ${t.trialCol}`;
             btn.textContent = t.startTrial(info.app.trial_days);
             fields.style.display = 'none';
+            extraBox.style.display = 'none';
             return;
           }
           const p = info.plans.find(x => x.id === id);
           summary.textContent = `${t.selected}: ${L(p)}`;
-          btn.textContent = t.buy(fmtPrice(p));
           fields.style.display = '';
+          extraBox.style.display = p.max_extra_devices ? '' : 'none';
+          extraIn.max = String(p.max_extra_devices || 0);
+          extraIn.value = String(extraCount(p));
+          extraHint.textContent = t.extraHint(p.max_devices, p.extra_device_pct);
+          refreshTotal();
         }
         async function trialStart() {
           say('');
@@ -1059,15 +1107,20 @@ body,body button,body input,body select,body textarea{font-family:'Tajawal',syst
         }
         btn.onclick = async () => {
           if (selected === '__trial') { btn.disabled = true; await trialStart(); btn.disabled = false; return; }
+          if (isOrg && name.value.trim().length < 2) { say(errText({ code: 'org_required' }), 'err'); name.focus(); return; }
           btn.disabled = true; say('');
-          const p = buy({ plan: selected, email: email.value.trim(), name: name.value.trim() });
+          const plan = info.plans.find(x => x.id === selected);
+          const p = buy({
+            plan: selected, email: email.value.trim(), name: name.value.trim(), org: isOrg ? name.value.trim() : undefined,
+            extra_devices: plan ? extraCount(plan) : 0,
+          });
           pane.replaceChildren(el('p', {}, t.waiting), el('button', { class: 'ghost', onclick: () => { stopPolling(); showBuy(); } }, t.cancelWait));
           try { await p; say(t.licensed, 'ok'); setTimeout(done, 1200); } catch (e) {
             if (e.code === 'canceled') return;
             showBuy().then(() => say(errText(e), 'err'));
           }
         };
-        pane.replaceChildren(table, summary, fields, btn);
+        pane.replaceChildren(table, summary, extraBox, fields, btn);
         if (selected) choose(selected);
       };
 
@@ -1132,7 +1185,7 @@ body,body button,body input,body select,body textarea{font-family:'Tajawal',syst
   }
 
   global.ExpressLicense = {
-    init, status, hasFeature, activate, startTrial, deactivate, buy, renew, recover, requirePro, openDialog, setLang,
+    init, status, org, hasFeature, activate, startTrial, deactivate, buy, renew, recover, requirePro, openDialog, setLang,
     refresh: () => refresh(true),
     get ready() { return S.ready; },
     onChange(fn) { S.listeners.add(fn); return () => S.listeners.delete(fn); },
