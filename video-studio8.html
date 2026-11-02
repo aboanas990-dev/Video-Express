@@ -506,6 +506,25 @@ body,body button,body input,body select,body textarea{font-family:'Tajawal',syst
     },
   };
 
+
+  // ---------- التقييم ----------
+  Object.assign(I18N.ar, {
+    rateBtn: 'قيّم البرنامج', rateTitle: 'ما تقييمك لهذا البرنامج؟', rateStar: n => `${n} من 5`,
+    rateComment: 'ملاحظة قصيرة (اختياري)', rateSend: 'أرسل التقييم', rateUpdate: 'حدّث تقييمي', rateThanks: 'شكرًا! وصل تقييمك ✓',
+    ratePick: 'اختر عدد النجوم.', rateMine: n => `تقييمك الحالي: ${n} من 5. يمكنك تغييره.`,
+    rateAsk: 'هل أعجبك البرنامج؟ قيّمه من نجمة إلى خمس نجوم.', rateNow: 'قيّم الآن', rateNever: 'لا تسألني مجددًا',
+    rateWait: 'يمكنك تعديل تقييمك مرة أخرى بعد 10 دقائق.',
+  });
+  Object.assign(I18N.ar.errors, { too_early: 'يمكنك التقييم بعد يوم من بدء التجربة.', invalid_stars: 'اختر من نجمة إلى خمس.', app_not_licensed: 'هذا الترخيص لا يشمل هذا البرنامج.' });
+  Object.assign(I18N.en, {
+    rateBtn: 'Rate this app', rateTitle: 'How would you rate this app?', rateStar: n => `${n} of 5`,
+    rateComment: 'Short comment (optional)', rateSend: 'Send rating', rateUpdate: 'Update my rating', rateThanks: 'Thank you! Your rating was sent ✓',
+    ratePick: 'Choose a number of stars.', rateMine: n => `Your rating: ${n} of 5. You can change it.`,
+    rateAsk: 'Enjoying the app? Rate it from one to five stars.', rateNow: 'Rate now', rateNever: "Don't ask again",
+    rateWait: 'You can change your rating again in 10 minutes.',
+  });
+  Object.assign(I18N.en.errors, { too_early: 'You can rate one day after starting the trial.', invalid_stars: 'Choose one to five stars.', app_not_licensed: 'This licence does not cover this app.' });
+
   // ---------- التشفير ----------
   function b64url(bytes) {
     let s = '';
@@ -614,6 +633,7 @@ body,body button,body input,body select,body textarea{font-family:'Tajawal',syst
     const changed = state !== S.state || payload?.lic !== S.payload?.lic || payload?.exp !== S.payload?.exp;
     S.state = state;
     S.payload = payload;
+    if ((state === 'licensed' || state === 'trial') && S.cfg && !LS.get(k('since'))) LS.set(k('since'), String(nowSec()));
     if (changed) S.listeners.forEach(fn => { try { fn(status()); } catch (e) { console.error(e); } });
     // اسم الجهة (رخص المؤسسات) تغيّر: يعرضه البرنامج في واجهته وتقاريره
     const o = org();
@@ -802,6 +822,58 @@ body,body button,body input,body select,body textarea{font-family:'Tajawal',syst
     return false;
   }
 
+  // ---------- التقييم ----------
+  // مثل قاعدة الخادم: رخصة مفعّلة، أو تجربة مضى عليها يوم. لا إلحاح: تذكير واحد فقط بعد 3 أيام ويمكن إيقافه نهائيًا
+  const usedSince = () => Number(LS.get(k('since'))) || nowSec();
+  function canRate() {
+    const st = status();
+    if (!LS.get(k('token')) || !st.pro) return false;
+    return st.state === 'licensed' || nowSec() - usedSince() >= DAY;
+  }
+  const myRating = () => { try { return JSON.parse(LS.get(k('rated')) || 'null'); } catch { return null; } };
+
+  async function rate(stars, comment) {
+    const token = LS.get(k('token'));
+    if (!token || !canRate()) throw err('too_early');
+    const r = await api('/v1/review', { token, stars, comment: comment || undefined });
+    LS.set(k('rated'), JSON.stringify({ stars, comment: comment || '' }));
+    LS.set(k('ratePrompt'), 'done');
+    return r;
+  }
+
+  function showRate(body, say) {
+    const t = S.t;
+    const mine = myRating();
+    let stars = mine?.stars || 0;
+    const btns = [1, 2, 3, 4, 5].map(n => el('button', { class: 'star', type: 'button', role: 'radio', 'aria-label': t.rateStar(n),
+      onclick: () => { stars = n; paint(); } }, '★'));
+    const paint = () => btns.forEach((b, i) => { b.classList.toggle('on', i < stars); b.setAttribute('aria-checked', String(i + 1 === stars)); });
+    const note = el('textarea', { maxlength: '300', rows: '3', placeholder: t.rateComment });
+    note.value = mine?.comment || '';
+    const send = el('button', { class: 'go' }, mine ? t.rateUpdate : t.rateSend);
+    send.onclick = async () => {
+      if (!stars) return say(t.ratePick, 'err');
+      send.disabled = true; say('');
+      try { await rate(stars, note.value.trim()); say(t.rateThanks, 'ok'); send.textContent = t.rateUpdate; } catch (e) { say(e.code === 'too_many_requests' ? t.rateWait : errText(e), 'err'); }
+      send.disabled = false;
+    };
+    body.replaceChildren(el('p', { class: 'reason' }, mine ? t.rateMine(mine.stars) : t.rateTitle),
+      el('div', { class: 'stars', role: 'radiogroup', 'aria-label': t.rateTitle }, btns), note, send);
+    paint();
+  }
+
+  function maybeRateToast() {
+    if (!document.body || !canRate() || myRating() || LS.get(k('ratePrompt'))) return;
+    if (nowSec() - usedSince() < 3 * DAY) return;
+    LS.set(k('ratePrompt'), 'shown');
+    ensureHost();
+    const toast = el('div', { class: 'toast rt', dir: S.lang === 'ar' ? 'rtl' : 'ltr' },
+      el('span', {}, S.t.rateAsk),
+      el('button', { class: 'r', onclick: () => { toast.remove(); openDialog({ rate: true }); } }, S.t.rateNow),
+      el('button', { class: 'l', onclick: () => toast.remove() }, S.t.rateNever));
+    root.appendChild(toast);
+  }
+
   // ---------- النسخ المشفّرة ----------
   async function decryptPayload() {
     const wrapped = JSON.parse(LS.get(k(`wk.${buildId()}`)) || 'null');
@@ -899,7 +971,12 @@ body,body button,body input,body select,body textarea{font-family:'Tajawal',syst
   .badge.ok{background:#16a34a}.badge.warn{background:#d97706}
   .toast{position:fixed;top:14px;inset-inline:0;margin:auto;width:min(460px,calc(100% - 32px));z-index:2147483645;background:#78350f;color:#fff7ed;border-radius:12px;padding:12px 14px;display:flex;gap:10px;align-items:center;font:14px/1.5 system-ui,Tahoma,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.35);box-sizing:border-box}
   .toast span{flex:1}.toast button{border:0;border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer}
-  .toast .r{background:#f59e0b;color:#1c1917;font-weight:600}.toast .l{background:transparent;color:#fed7aa}`;
+  .toast .r{background:#f59e0b;color:#1c1917;font-weight:600}.toast .l{background:transparent;color:#fed7aa}
+  .stars{display:flex;gap:6px;justify-content:center;margin:4px 0 12px;direction:ltr}
+  .star{background:none;border:0;font-size:34px;line-height:1;color:#334155;cursor:pointer;padding:2px}
+  .star.on{color:#c9a227}.star:focus-visible{outline:2px solid #c9a227;border-radius:6px}
+  textarea{box-sizing:border-box;width:100%;background:#020617;color:#f1f5f9;border:1px solid #334155;border-radius:10px;padding:10px 12px;font:inherit;margin-bottom:12px;resize:vertical}
+  .toast.rt{background:#0a1f44;border:1px solid #c9a227}.toast.rt .r{background:#c9a227;color:#1c1405}.toast.rt .l{color:#cbd5e1}`;
 
   let host, root, badgeEl;
   function ensureHost() {
@@ -979,7 +1056,9 @@ body,body button,body input,body select,body textarea{font-family:'Tajawal',syst
         st.renewDue ? el('p', { class: 'reason' }, t.renewSoon(st.daysLeft)) : null,
         st.renewDue ? renewButton() : null,
         st.state === 'trial' && !opts.upgrade ? el('button', { class: 'go', style: 'margin-top:10px', onclick: () => showPurchase() }, t.buyTab) : null,
+        canRate() ? el('button', { class: 'alt', onclick: () => showRate(body, say) }, t.rateBtn) : null,
         el('button', { class: 'ghost danger', onclick: async () => { await deactivate(); close(); if (S.cfg.protected) location.reload(); } }, t.deactivate));
+      if (opts.rate && canRate()) showRate(body, say);
       if (st.state !== 'trial' && !opts.upgrade) return;
     }
 
@@ -1134,7 +1213,8 @@ body,body button,body input,body select,body textarea{font-family:'Tajawal',syst
   // تنبيه التجديد قبل انتهاء الرخصة المؤقتة (مرة في اليوم)
   function maybeRenewToast() {
     const st = status();
-    if (!st.renewDue || !document.body) return;
+    if (!document.body) return;
+    if (!st.renewDue) return maybeRateToast();
     const today = new Date().toDateString();
     if (LS.get(k('renewToast')) === today) return;
     LS.set(k('renewToast'), today);
@@ -1186,6 +1266,7 @@ body,body button,body input,body select,body textarea{font-family:'Tajawal',syst
 
   global.ExpressLicense = {
     init, status, org, hasFeature, activate, startTrial, deactivate, buy, renew, recover, requirePro, openDialog, setLang,
+    rate, openRate: () => openDialog({ rate: true }),
     refresh: () => refresh(true),
     get ready() { return S.ready; },
     onChange(fn) { S.listeners.add(fn); return () => S.listeners.delete(fn); },
