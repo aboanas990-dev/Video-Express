@@ -56,3 +56,12 @@
 | `THIRD_PARTY_NOTICES.md` | إشعارات المكتبات والخدمات الخارجية |
 
 © 2026 حسن الفيفي · Hassan Alfaifi — جميع الحقوق محفوظة
+
+<!-- replica-2026-11-06 -->
+## الاختصارات الجديدة
+
+- **Ctrl+Shift+K**: لوحة الأوامر، ابحث فيها عن صفحة أو زر أو صف في جدول ظاهر، ثم اضغط Enter.
+
+## New shortcuts
+
+- **Ctrl+Shift+K**: command palette. Search visible pages, buttons and table rows, then press Enter.
